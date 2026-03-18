@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { logout, getStoredUser } from '../../lib/auth';
 import { mockRegistros } from '../../lib/mock-data';
@@ -22,6 +23,7 @@ function KPI({ label, value, color }: { label: string; value: number; color: str
 }
 
 export default function JefeDashboard() {
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<any>(null);
   const [registros, setRegistros] = useState<any[]>([]);
 
@@ -98,7 +100,7 @@ export default function JefeDashboard() {
       </ScrollView>
 
       {/* Bottom nav */}
-      <View style={s.bottomNav}>
+      <View style={[s.bottomNav, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {[
           { label: 'Dashboard', path: '/(jefe)/dashboard' },
           { label: 'Mis Registros', path: '/(jefe)/mis-registros' },
@@ -137,7 +139,7 @@ const s = StyleSheet.create({
   registroSub: { color: '#8b949e', fontSize: 11, marginTop: 2 },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20, marginLeft: 8 },
   badgeText: { fontSize: 11, fontWeight: '600' },
-  bottomNav: { flexDirection: 'row', backgroundColor: '#080b0f', borderTopWidth: 1, borderTopColor: '#21262d', paddingBottom: 20, alignItems: 'center' },
+  bottomNav: { flexDirection: 'row', backgroundColor: '#080b0f', borderTopWidth: 1, borderTopColor: '#21262d', alignItems: 'center' },
   navItem: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   navLabel: { color: '#8b949e', fontSize: 11, fontWeight: '500' },
   navFab: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#1d6fb8', alignItems: 'center', justifyContent: 'center', marginTop: -20, marginHorizontal: 16, shadowColor: '#1d6fb8', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 8 },

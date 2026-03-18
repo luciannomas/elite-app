@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { logout, getStoredUser } from '../../lib/auth';
 import { mockKPIs, mockRegistros } from '../../lib/mock-data';
@@ -21,6 +22,7 @@ function KPI({ label, value, unit, color }: { label: string; value: any; unit?: 
 }
 
 export default function AuditorDashboard() {
+  const insets = useSafeAreaInsets();
   const [user, setUser] = useState<any>(null);
   const [pendientes, setPendientes] = useState(mockRegistros.filter(r => r.status === 'pre_aprobado'));
 
@@ -86,7 +88,7 @@ export default function AuditorDashboard() {
       </ScrollView>
 
       {/* Bottom nav */}
-      <View style={s.bottomNav}>
+      <View style={[s.bottomNav, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {[
           { label: 'Dashboard', path: '/(auditor)/dashboard' },
           { label: 'Aprobar', path: '/(auditor)/aprobaciones' },
@@ -123,7 +125,7 @@ const s = StyleSheet.create({
   registroSub: { color: '#8b949e', fontSize: 11, marginTop: 2 },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
   badgeText: { fontSize: 11, fontWeight: '600' },
-  bottomNav: { flexDirection: 'row', backgroundColor: '#080b0f', borderTopWidth: 1, borderTopColor: '#21262d', paddingBottom: 20 },
+  bottomNav: { flexDirection: 'row', backgroundColor: '#080b0f', borderTopWidth: 1, borderTopColor: '#21262d' },
   navItem: { flex: 1, alignItems: 'center', paddingVertical: 12 },
   navLabel: { color: '#8b949e', fontSize: 11, fontWeight: '500' },
 });

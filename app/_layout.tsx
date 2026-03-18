@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getStoredUser } from '../lib/auth';
 
 export default function RootLayout() {
@@ -20,9 +21,9 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
+    <SafeAreaProvider>
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0f1117' } }} />
-    </>
+    </SafeAreaProvider>
   );
 }
