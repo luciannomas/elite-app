@@ -21,6 +21,7 @@ interface FormData {
   descripcion: string;
   encargado: string;
   personalACargo: string[];
+  vehiculo: string;
   kmInicial: string;
   kmFinal: string;
   horaInicio: string;
@@ -71,6 +72,7 @@ export default function NuevaJornadaScreen() {
   const [loading, setLoading] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalog, setCatalog] = useState<CatalogData | null>(null);
+  const [kmLoading, setKmLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<FormData>({
     fecha: today(),
@@ -81,6 +83,7 @@ export default function NuevaJornadaScreen() {
     descripcion: '',
     encargado: '',
     personalACargo: [],
+    vehiculo: '',
     kmInicial: '',
     kmFinal: '',
     horaInicio: '08:00',
@@ -106,6 +109,20 @@ export default function NuevaJornadaScreen() {
   function set(key: keyof FormData, val: any) {
     setForm(prev => ({ ...prev, [key]: val }));
     setErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
+  async function selectVehiculo(patente: string) {
+    set('vehiculo', patente);
+    if (!patente) return;
+    setKmLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/registros/ultimo-km?patente=${encodeURIComponent(patente)}`);
+      const json = await res.json();
+      if (json.success && json.kmFinal) {
+        set('kmInicial', String(json.kmFinal));
+      }
+    } catch {}
+    finally { setKmLoading(false); }
   }
 
   function togglePersonal(name: string) {
@@ -296,15 +313,34 @@ export default function NuevaJornadaScreen() {
             </View>
 
             <View style={s.card}>
+              <Text style={s.label}>Vehículo</Text>
+              {catalogLoading
+                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
+                : <View style={s.chipWrap}>
+                    {(catalog?.vehiculos ?? []).map(v => (
+                      <SelectOption
+                        key={v._id}
+                        label={v.patente}
+                        selected={form.vehiculo === v.patente}
+                        onPress={() => selectVehiculo(v.patente)}
+                      />
+                    ))}
+                  </View>
+              }
+            </View>
+
+            <View style={s.card}>
               <Text style={s.label}>Odómetro inicial (km)</Text>
               <TextInput
                 style={s.input}
                 value={form.kmInicial}
                 onChangeText={v => set('kmInicial', v)}
-                placeholder="Ej: 45000"
+                placeholder={kmLoading ? 'Buscando último KM...' : 'Ej: 45000'}
                 placeholderTextColor="#484f58"
                 keyboardType="numeric"
+                editable={!kmLoading}
               />
+              {kmLoading && <Text style={s.selectedNote}>Cargando último KM registrado...</Text>}
             </View>
 
             <View style={s.card}>
