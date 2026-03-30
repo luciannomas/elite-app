@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { API_URL } from '../../lib/api';
+import type { User } from '../../lib/auth';
 
 type CatalogData = {
   clientes: { _id: string; nombre: string }[];
@@ -36,7 +38,15 @@ function today() {
   return new Date().toISOString().split('T')[0];
 }
 
-function StepDot({ n, current }: { n: number; current: number }) {
+function calcHoras(inicio: string, fin: string): string {
+  if (!inicio || !fin) return '';
+  const [h1, m1] = inicio.split(':').map(Number);
+  const [h2, m2] = fin.split(':').map(Number);
+  const diff = (h2 * 60 + m2 - (h1 * 60 + m1)) / 60;
+  return diff > 0 ? diff.toFixed(1) : '';
+}
+
+function StepDot({ n, current, total }: { n: number; current: number; total: number }) {
   const done = n < current;
   const active = n === current;
   return (
@@ -74,6 +84,7 @@ export default function NuevaJornadaScreen() {
   const [catalog, setCatalog] = useState<CatalogData | null>(null);
   const [kmLoading, setKmLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [form, setForm] = useState<FormData>({
     fecha: today(),
     campo: true,
@@ -94,7 +105,14 @@ export default function NuevaJornadaScreen() {
     observaciones: '',
   });
 
+  const esTaller = !form.campo;
+  const TOTAL_STEPS = esTaller ? 2 : 3;
+  const stepLabels = esTaller ? ['Taller', 'Horarios'] : ['Jornada', 'Personal', 'Tiempos'];
+
   useEffect(() => {
+    SecureStore.getItemAsync('elite_user').then(raw => {
+      if (raw) setCurrentUser(JSON.parse(raw));
+    });
     fetch(`${API_URL}/api/catalogo`)
       .then(r => r.json())
       .then(res => { if (res.success) setCatalog(res.data); })
@@ -111,18 +129,24 @@ export default function NuevaJornadaScreen() {
     setErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
   }
 
+  function switchTipo(isCampo: boolean) {
+    setForm(prev => ({ ...prev, campo: isCampo }));
+    setStep(1);
+    setErrors({});
+  }
+
   async function selectVehiculo(patente: string) {
     set('vehiculo', patente);
     set('kmInicial', '');
     if (!patente) return;
     setKmLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/registros/ultimo-km?patente=${encodeURIComponent(patente)}`);
+      const token = await SecureStore.getItemAsync('elite_token');
+      const res = await fetch(`${API_URL}/api/registros/ultimo-km?patente=${encodeURIComponent(patente)}`, {
+        headers: token ? { Cookie: `next-auth.session-token=${token}` } : {},
+      });
       const json = await res.json();
-      // Si hay último KM registrado → pre-completar. Si no → dejar vacío para ingreso manual
-      if (json.success && json.kmFinal) {
-        set('kmInicial', String(json.kmFinal));
-      }
+      if (json.success && json.kmFinal) set('kmInicial', String(json.kmFinal));
     } catch {}
     finally { setKmLoading(false); }
   }
@@ -136,25 +160,36 @@ export default function NuevaJornadaScreen() {
     }));
   }
 
-  function validateStep(s: number): Record<string, string> {
+  function validateCurrentStep(): Record<string, string> {
     const errs: Record<string, string> = {};
-    if (s === 1) {
-      if (!form.cliente) errs.cliente = 'Seleccioná un cliente';
-      if (!form.tipoProyecto) errs.tipoProyecto = 'Seleccioná el tipo de proyecto';
-      if (!form.descripcion.trim()) errs.descripcion = 'Describí las tareas realizadas';
-    }
-    if (s === 2) {
-      if (!form.encargado) errs.encargado = 'Seleccioná el encargado de cuadrilla';
-    }
-    if (s === 3) {
-      if (!form.horaInicio) errs.horaInicio = 'Ingresá la hora de inicio';
-      if (!form.horaFin) errs.horaFin = 'Ingresá la hora de finalización';
+    if (esTaller) {
+      if (step === 1) {
+        if (!form.tipoProyecto) errs.tipoProyecto = 'Seleccioná el tipo de tarea';
+        if (!form.descripcion.trim()) errs.descripcion = 'Describí las tareas realizadas';
+      }
+      if (step === 2) {
+        if (!form.horaInicio) errs.horaInicio = 'Ingresá la hora de entrada';
+        if (!form.horaFin) errs.horaFin = 'Ingresá la hora de salida';
+      }
+    } else {
+      if (step === 1) {
+        if (!form.cliente) errs.cliente = 'Seleccioná un cliente';
+        if (!form.tipoProyecto) errs.tipoProyecto = 'Seleccioná el tipo de proyecto';
+        if (!form.descripcion.trim()) errs.descripcion = 'Describí las tareas realizadas';
+      }
+      if (step === 2) {
+        if (!form.encargado) errs.encargado = 'Seleccioná el encargado de cuadrilla';
+      }
+      if (step === 3) {
+        if (!form.horaInicio) errs.horaInicio = 'Ingresá la hora de inicio';
+        if (!form.horaFin) errs.horaFin = 'Ingresá la hora de finalización';
+      }
     }
     return errs;
   }
 
   function next() {
-    const errs = validateStep(step);
+    const errs = validateCurrentStep();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       Alert.alert('Campos incompletos', 'Completá los campos obligatorios antes de continuar.');
@@ -165,7 +200,7 @@ export default function NuevaJornadaScreen() {
   }
 
   async function submit() {
-    const errs = validateStep(3);
+    const errs = validateCurrentStep();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       Alert.alert('Campos incompletos', 'Completá los campos obligatorios.');
@@ -173,12 +208,44 @@ export default function NuevaJornadaScreen() {
     }
     setLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const token = await SecureStore.getItemAsync('elite_token');
+      const responsable = currentUser?.name || currentUser?.email || '';
+      const payload = {
+        fecha: form.fecha,
+        trabajoRealizadoEn: form.campo ? 'campo' : 'taller',
+        estadoActividad: 'Productivo',
+        clienteNombre: form.campo ? form.cliente : '',
+        proyectoNombre: form.campo ? form.proyectoNombre : '',
+        tipoProyecto: form.tipoProyecto,
+        tareaTexto: form.descripcion,
+        encargadoNombre: form.campo ? form.encargado : responsable,
+        personalACargo: form.campo ? form.personalACargo.join(', ') : '',
+        nPersonas: form.campo ? form.personalACargo.length + 1 : 1,
+        vehiculoPatente: form.campo ? form.vehiculo : '',
+        kmInicial: form.kmInicial ? parseFloat(form.kmInicial) : undefined,
+        kmFinal: form.kmFinal ? parseFloat(form.kmFinal) : undefined,
+        horaInicio: form.horaInicio,
+        horaInicioField: form.campo ? form.horaInicioField : '',
+        horaFinField: form.campo ? form.horaFinField : '',
+        horaFin: form.horaFin,
+        hospedaje: form.hospedaje,
+        observaciones: form.observaciones,
+      };
+      const res = await fetch(`${API_URL}/api/registros`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Cookie: `next-auth.session-token=${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Error al guardar');
       Alert.alert('¡Jornada enviada!', 'El registro fue enviado para aprobación.', [
         { text: 'OK', onPress: () => router.replace('/(jefe)/dashboard') },
       ]);
-    } catch (e) {
-      Alert.alert('Error', 'No se pudo enviar la jornada');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'No se pudo enviar la jornada');
     } finally {
       setLoading(false);
     }
@@ -196,20 +263,24 @@ export default function NuevaJornadaScreen() {
 
       {/* Steps */}
       <View style={s.steps}>
-        {[1, 2, 3].map(n => (
-          <View key={n} style={{ alignItems: 'center', flex: 1 }}>
-            <StepDot n={n} current={step} />
-            <Text style={s.stepLabel}>{['Jornada', 'Personal', 'Tiempos'][n - 1]}</Text>
+        {stepLabels.map((label, i) => (
+          <View key={i} style={{ alignItems: 'center', flex: 1 }}>
+            <StepDot n={i + 1} current={step} total={TOTAL_STEPS} />
+            <Text style={s.stepLabel}>{label}</Text>
           </View>
         ))}
-        <View style={[s.stepLine, { left: '16%', right: '50%' }]} />
-        <View style={[s.stepLine, { left: '50%', right: '16%' }]} />
+        {TOTAL_STEPS > 1 && (
+          <View style={[s.stepLine, { left: '16%', right: TOTAL_STEPS === 3 ? '50%' : '16%' }]} />
+        )}
+        {TOTAL_STEPS === 3 && (
+          <View style={[s.stepLine, { left: '50%', right: '16%' }]} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
-        {/* STEP 1 */}
-        {step === 1 && (
+        {/* ── TALLER STEP 1 ── */}
+        {step === 1 && esTaller && (
           <>
             <View style={s.card}>
               <Text style={s.label}>Fecha</Text>
@@ -219,11 +290,130 @@ export default function NuevaJornadaScreen() {
             <View style={s.card}>
               <Text style={s.label}>Tipo de trabajo</Text>
               <View style={s.toggleRow}>
-                <TouchableOpacity style={[s.toggle, form.campo && s.toggleActive]} onPress={() => set('campo', true)}>
-                  <Text style={[s.toggleText, form.campo && s.toggleTextActive]}>Campo</Text>
+                <TouchableOpacity style={[s.toggle, !esTaller && s.toggleActive]} onPress={() => switchTipo(true)}>
+                  <Text style={[s.toggleText, !esTaller && s.toggleTextActive]}>Campo</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[s.toggle, !form.campo && s.toggleActive]} onPress={() => set('campo', false)}>
-                  <Text style={[s.toggleText, !form.campo && s.toggleTextActive]}>Taller</Text>
+                <TouchableOpacity style={[s.toggle, esTaller && s.toggleActive]} onPress={() => switchTipo(false)}>
+                  <Text style={[s.toggleText, esTaller && s.toggleTextActive]}>Taller</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={[s.card, !!errors.tipoProyecto && s.cardError]}>
+              <Text style={s.label}>Tipo de tarea <Text style={s.required}>*</Text></Text>
+              {catalogLoading
+                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
+                : <View style={s.chipWrap}>
+                    {(catalog?.tiposProyecto ?? []).map(t => (
+                      <SelectOption key={t} label={t} selected={form.tipoProyecto === t} onPress={() => set('tipoProyecto', t)} />
+                    ))}
+                  </View>
+              }
+              <FieldError msg={errors.tipoProyecto} />
+            </View>
+
+            <View style={[s.card, !!errors.descripcion && s.cardError]}>
+              <Text style={s.label}>Descripción de la tarea <Text style={s.required}>*</Text></Text>
+              <TextInput
+                style={[s.input, { minHeight: 80, textAlignVertical: 'top' }, !!errors.descripcion && s.inputError]}
+                value={form.descripcion}
+                onChangeText={v => set('descripcion', v)}
+                placeholder="Describí las tareas realizadas en el taller..."
+                placeholderTextColor="#484f58"
+                multiline
+              />
+              <FieldError msg={errors.descripcion} />
+            </View>
+
+            <View style={s.card}>
+              <Text style={s.label}>Persona responsable</Text>
+              <View style={[s.input, { justifyContent: 'center' }]}>
+                <Text style={{ color: 'white', fontSize: 15 }}>
+                  {currentUser?.name || currentUser?.email || 'Usuario actual'}
+                </Text>
+              </View>
+              <Text style={[s.selectedNote, { marginTop: 6 }]}>Se registra automáticamente con tu usuario</Text>
+            </View>
+          </>
+        )}
+
+        {/* ── TALLER STEP 2 — Horarios ── */}
+        {step === 2 && esTaller && (
+          <>
+            <View style={s.card}>
+              <Text style={s.cardTitle}>Horarios</Text>
+              <View style={s.timeRow}>
+                <Text style={s.timeLabel}>Hora de entrada <Text style={s.required}>*</Text></Text>
+                <TextInput
+                  style={[s.timeInput, !!errors.horaInicio && s.inputError]}
+                  value={form.horaInicio}
+                  onChangeText={v => set('horaInicio', v)}
+                  placeholder="HH:MM"
+                  placeholderTextColor="#484f58"
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                />
+              </View>
+              {errors.horaInicio && <Text style={[s.fieldError, { marginBottom: 4 }]}>{errors.horaInicio}</Text>}
+              <View style={s.timeRow}>
+                <Text style={s.timeLabel}>Hora de salida <Text style={s.required}>*</Text></Text>
+                <TextInput
+                  style={[s.timeInput, !!errors.horaFin && s.inputError]}
+                  value={form.horaFin}
+                  onChangeText={v => set('horaFin', v)}
+                  placeholder="HH:MM"
+                  placeholderTextColor="#484f58"
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                />
+              </View>
+              {errors.horaFin && <Text style={[s.fieldError, { marginBottom: 4 }]}>{errors.horaFin}</Text>}
+              {form.horaInicio && form.horaFin && calcHoras(form.horaInicio, form.horaFin) && (
+                <View style={[s.summaryBox, { marginTop: 12 }]}>
+                  <Text style={s.summaryLabel}>Horas trabajadas</Text>
+                  <Text style={s.summaryValue}>{calcHoras(form.horaInicio, form.horaFin)}h</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={s.card}>
+              <Text style={s.label}>Observaciones (opcional)</Text>
+              <TextInput
+                style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                value={form.observaciones}
+                onChangeText={v => set('observaciones', v)}
+                placeholder="Notas adicionales..."
+                placeholderTextColor="#484f58"
+                multiline
+              />
+            </View>
+
+            {/* Resumen taller */}
+            <View style={[s.card, { borderColor: '#1d6fb840' }]}>
+              <Text style={[s.cardTitle, { color: '#1d6fb8' }]}>Resumen</Text>
+              <Text style={s.summaryLine}>{form.fecha} · Taller</Text>
+              <Text style={s.summaryLine}>{form.tipoProyecto}</Text>
+              <Text style={s.summaryLine}>Responsable: {currentUser?.name || currentUser?.email || '—'}</Text>
+            </View>
+          </>
+        )}
+
+        {/* ── CAMPO STEP 1 ── */}
+        {step === 1 && !esTaller && (
+          <>
+            <View style={s.card}>
+              <Text style={s.label}>Fecha</Text>
+              <TextInput style={s.input} value={form.fecha} onChangeText={v => set('fecha', v)} placeholderTextColor="#484f58" />
+            </View>
+
+            <View style={s.card}>
+              <Text style={s.label}>Tipo de trabajo</Text>
+              <View style={s.toggleRow}>
+                <TouchableOpacity style={[s.toggle, !esTaller && s.toggleActive]} onPress={() => switchTipo(true)}>
+                  <Text style={[s.toggleText, !esTaller && s.toggleTextActive]}>Campo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.toggle, esTaller && s.toggleActive]} onPress={() => switchTipo(false)}>
+                  <Text style={[s.toggleText, esTaller && s.toggleTextActive]}>Taller</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -281,8 +471,8 @@ export default function NuevaJornadaScreen() {
           </>
         )}
 
-        {/* STEP 2 */}
-        {step === 2 && (
+        {/* ── CAMPO STEP 2 — Personal y Vehículo ── */}
+        {step === 2 && !esTaller && (
           <>
             <View style={[s.card, !!errors.encargado && s.cardError]}>
               <Text style={s.label}>Encargado <Text style={s.required}>*</Text></Text>
@@ -343,8 +533,8 @@ export default function NuevaJornadaScreen() {
                 editable={!kmLoading}
               />
               {kmLoading && <Text style={s.selectedNote}>Buscando último odómetro registrado...</Text>}
-              {!kmLoading && form.kmInicial ? <Text style={[s.selectedNote, { color: '#238636' }]}>✓ Tomado del último registro</Text> : null}
-              {!kmLoading && form.vehiculo && !form.kmInicial ? <Text style={s.selectedNote}>Sin registros previos — ingresá el valor</Text> : null}
+              {!kmLoading && !!form.kmInicial && <Text style={[s.selectedNote, { color: '#238636' }]}>✓ Tomado del último registro</Text>}
+              {!kmLoading && !!form.vehiculo && !form.kmInicial && <Text style={s.selectedNote}>Sin registros previos — ingresá el valor</Text>}
             </View>
 
             <View style={s.card}>
@@ -364,11 +554,11 @@ export default function NuevaJornadaScreen() {
           </>
         )}
 
-        {/* STEP 3 */}
-        {step === 3 && (
+        {/* ── CAMPO STEP 3 — Tiempos ── */}
+        {step === 3 && !esTaller && (
           <>
             <View style={s.card}>
-              <Text style={s.cardTitle}>Tiempos</Text>
+              <Text style={s.cardTitle}>Horarios</Text>
               {[
                 { key: 'horaInicio', label: 'Salida del hotel / base', required: true },
                 { key: 'horaInicioField', label: 'Llegada al mástil / campo', required: false },
@@ -416,10 +606,10 @@ export default function NuevaJornadaScreen() {
               />
             </View>
 
-            {/* Resumen */}
+            {/* Resumen campo */}
             <View style={[s.card, { borderColor: '#1d6fb840' }]}>
               <Text style={[s.cardTitle, { color: '#1d6fb8' }]}>Resumen</Text>
-              <Text style={s.summaryLine}>{form.fecha} · {form.campo ? 'Campo' : 'Taller'}</Text>
+              <Text style={s.summaryLine}>{form.fecha} · Campo</Text>
               <Text style={s.summaryLine}>{form.cliente} — {form.proyectoNombre || form.tipoProyecto}</Text>
               <Text style={s.summaryLine}>Enc: {form.encargado}</Text>
               {form.personalACargo.length > 0 && (
@@ -432,12 +622,12 @@ export default function NuevaJornadaScreen() {
 
       {/* Footer buttons */}
       <View style={s.footer}>
-        {step < 3 ? (
+        {step < TOTAL_STEPS ? (
           <TouchableOpacity style={s.nextBtn} onPress={next}>
             <Text style={s.nextBtnText}>Siguiente →</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity style={[s.nextBtn, loading && { opacity: 0.6 }]} onPress={submit} disabled={loading}>
+          <TouchableOpacity style={[s.nextBtn, { backgroundColor: '#238636' }, loading && { opacity: 0.6 }]} onPress={submit} disabled={loading}>
             {loading
               ? <ActivityIndicator color="white" />
               : <Text style={s.nextBtnText}>Enviar Jornada</Text>}
@@ -479,6 +669,9 @@ const s = StyleSheet.create({
   timeLabel: { color: '#8b949e', fontSize: 13, flex: 1 },
   timeInput: { backgroundColor: '#0f1117', borderWidth: 1, borderColor: '#30363d', borderRadius: 8, padding: 10, color: 'white', fontSize: 15, width: 80, textAlign: 'center' },
   summaryLine: { color: '#8b949e', fontSize: 13, marginBottom: 4 },
+  summaryBox: { backgroundColor: 'rgba(29,111,184,0.1)', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: 'rgba(29,111,184,0.3)' },
+  summaryLabel: { color: '#8b949e', fontSize: 12 },
+  summaryValue: { color: 'white', fontSize: 28, fontWeight: 'bold', marginTop: 2 },
   footer: { padding: 16, paddingBottom: 32, backgroundColor: '#080b0f', borderTopWidth: 1, borderTopColor: '#21262d' },
   nextBtn: { backgroundColor: '#1d6fb8', borderRadius: 12, padding: 16, alignItems: 'center' },
   nextBtnText: { color: 'white', fontWeight: '700', fontSize: 16 },
