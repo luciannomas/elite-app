@@ -1,20 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
+import { API_URL } from '../../lib/api';
 
-const TIPOS_PROYECTO = [
-  'M. Preventivo', 'M. Correctivo', 'Instalación equipos', 'Relevamiento',
-  'Visita preliminar', 'Montaje estructura', 'Viaje', 'Desmontaje',
-  'Stand-by', 'Adecuación', 'Replanteo', 'Traslado', 'Puesta en Marcha',
-];
-
-const CLIENTES = ['Fortescue', 'Abo Energy', 'PCR', 'Genneia', 'Coarco', 'Ternium', 'YPF LUZ', 'NEOEN'];
-
-const PERSONAL = [
-  'Amarilla Carlos', 'Barreto Ayrton', 'Dodera William', 'Maza Gabriel',
-  'Maza Roman', 'Nuñez Basilio', 'Reyes Alexis', 'Romero Nelson',
-  'Silva Carlos', 'Surra Juan', 'Torgues Enzo', 'Winnik Rodrigo',
-];
+type CatalogData = {
+  clientes: { _id: string; nombre: string }[];
+  proyectos: { _id: string; nombre: string; clienteNombre: string }[];
+  personal: { _id: string; nombre: string }[];
+  vehiculos: { _id: string; patente: string }[];
+  tiposProyecto: string[];
+  categoriasStandBy: string[];
+};
 
 interface FormData {
   fecha: string;
@@ -73,6 +69,8 @@ function FieldError({ msg }: { msg?: string }) {
 export default function NuevaJornadaScreen() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalog, setCatalog] = useState<CatalogData | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<FormData>({
     fecha: today(),
@@ -92,6 +90,18 @@ export default function NuevaJornadaScreen() {
     hospedaje: '',
     observaciones: '',
   });
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/catalogo`)
+      .then(r => r.json())
+      .then(res => { if (res.success) setCatalog(res.data); })
+      .catch(() => {})
+      .finally(() => setCatalogLoading(false));
+  }, []);
+
+  const filteredProyectos = catalog?.proyectos.filter(p =>
+    !form.cliente || p.clienteNombre === form.cliente
+  ) ?? [];
 
   function set(key: keyof FormData, val: any) {
     setForm(prev => ({ ...prev, [key]: val }));
@@ -201,33 +211,40 @@ export default function NuevaJornadaScreen() {
 
             <View style={[s.card, !!errors.cliente && s.cardError]}>
               <Text style={s.label}>Cliente <Text style={s.required}>*</Text></Text>
-              <View style={s.chipWrap}>
-                {CLIENTES.map(c => (
-                  <SelectOption key={c} label={c} selected={form.cliente === c} onPress={() => set('cliente', c)} />
-                ))}
-              </View>
+              {catalogLoading
+                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
+                : <View style={s.chipWrap}>
+                    {(catalog?.clientes ?? []).map(c => (
+                      <SelectOption key={c._id} label={c.nombre} selected={form.cliente === c.nombre} onPress={() => { set('cliente', c.nombre); set('proyectoNombre', ''); }} />
+                    ))}
+                  </View>
+              }
               <FieldError msg={errors.cliente} />
             </View>
 
             <View style={[s.card, !!errors.tipoProyecto && s.cardError]}>
               <Text style={s.label}>Tipo de proyecto <Text style={s.required}>*</Text></Text>
-              <View style={s.chipWrap}>
-                {TIPOS_PROYECTO.map(t => (
-                  <SelectOption key={t} label={t} selected={form.tipoProyecto === t} onPress={() => set('tipoProyecto', t)} />
-                ))}
-              </View>
+              {catalogLoading
+                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
+                : <View style={s.chipWrap}>
+                    {(catalog?.tiposProyecto ?? []).map(t => (
+                      <SelectOption key={t} label={t} selected={form.tipoProyecto === t} onPress={() => set('tipoProyecto', t)} />
+                    ))}
+                  </View>
+              }
               <FieldError msg={errors.tipoProyecto} />
             </View>
 
             <View style={s.card}>
               <Text style={s.label}>Nombre del proyecto / mástil</Text>
-              <TextInput
-                style={s.input}
-                value={form.proyectoNombre}
-                onChangeText={v => set('proyectoNombre', v)}
-                placeholder="Ej: MM-ARG-017-CH"
-                placeholderTextColor="#484f58"
-              />
+              {catalogLoading
+                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
+                : <View style={s.chipWrap}>
+                    {filteredProyectos.map(p => (
+                      <SelectOption key={p._id} label={p.nombre} selected={form.proyectoNombre === p.nombre} onPress={() => set('proyectoNombre', p.nombre)} />
+                    ))}
+                  </View>
+              }
             </View>
 
             <View style={[s.card, !!errors.descripcion && s.cardError]}>
@@ -250,23 +267,26 @@ export default function NuevaJornadaScreen() {
           <>
             <View style={[s.card, !!errors.encargado && s.cardError]}>
               <Text style={s.label}>Encargado <Text style={s.required}>*</Text></Text>
-              <View style={s.chipWrap}>
-                {PERSONAL.map(p => (
-                  <SelectOption key={p} label={p} selected={form.encargado === p} onPress={() => set('encargado', p)} />
-                ))}
-              </View>
+              {catalogLoading
+                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
+                : <View style={s.chipWrap}>
+                    {(catalog?.personal ?? []).map(p => (
+                      <SelectOption key={p._id} label={p.nombre} selected={form.encargado === p.nombre} onPress={() => set('encargado', p.nombre)} />
+                    ))}
+                  </View>
+              }
               <FieldError msg={errors.encargado} />
             </View>
 
             <View style={s.card}>
               <Text style={s.label}>Personal a cargo</Text>
               <View style={s.chipWrap}>
-                {PERSONAL.filter(p => p !== form.encargado).map(p => (
+                {(catalog?.personal ?? []).filter(p => p.nombre !== form.encargado).map(p => (
                   <SelectOption
-                    key={p}
-                    label={p}
-                    selected={form.personalACargo.includes(p)}
-                    onPress={() => togglePersonal(p)}
+                    key={p._id}
+                    label={p.nombre}
+                    selected={form.personalACargo.includes(p.nombre)}
+                    onPress={() => togglePersonal(p.nombre)}
                   />
                 ))}
               </View>
