@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Switch, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 
 const TIPOS_PROYECTO = [
@@ -59,18 +59,21 @@ const dot = StyleSheet.create({
 
 function SelectOption({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   return (
-    <TouchableOpacity
-      style={[s.option, selected && s.optionSelected]}
-      onPress={onPress}
-    >
+    <TouchableOpacity style={[s.option, selected && s.optionSelected]} onPress={onPress}>
       <Text style={[s.optionText, selected && s.optionTextSelected]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
+function FieldError({ msg }: { msg?: string }) {
+  if (!msg) return null;
+  return <Text style={s.fieldError}>{msg}</Text>;
+}
+
 export default function NuevaJornadaScreen() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<FormData>({
     fecha: today(),
     campo: true,
@@ -92,6 +95,7 @@ export default function NuevaJornadaScreen() {
 
   function set(key: keyof FormData, val: any) {
     setForm(prev => ({ ...prev, [key]: val }));
+    setErrors(prev => { const next = { ...prev }; delete next[key]; return next; });
   }
 
   function togglePersonal(name: string) {
@@ -103,26 +107,43 @@ export default function NuevaJornadaScreen() {
     }));
   }
 
-  function validateStep(): boolean {
-    if (step === 1) {
-      if (!form.cliente) { Alert.alert('Falta cliente'); return false; }
-      if (!form.tipoProyecto) { Alert.alert('Falta tipo de proyecto'); return false; }
+  function validateStep(s: number): Record<string, string> {
+    const errs: Record<string, string> = {};
+    if (s === 1) {
+      if (!form.cliente) errs.cliente = 'Seleccioná un cliente';
+      if (!form.tipoProyecto) errs.tipoProyecto = 'Seleccioná el tipo de proyecto';
+      if (!form.descripcion.trim()) errs.descripcion = 'Describí las tareas realizadas';
     }
-    if (step === 2) {
-      if (!form.encargado) { Alert.alert('Falta encargado'); return false; }
+    if (s === 2) {
+      if (!form.encargado) errs.encargado = 'Seleccioná el encargado de cuadrilla';
     }
-    return true;
+    if (s === 3) {
+      if (!form.horaInicio) errs.horaInicio = 'Ingresá la hora de inicio';
+      if (!form.horaFin) errs.horaFin = 'Ingresá la hora de finalización';
+    }
+    return errs;
   }
 
   function next() {
-    if (!validateStep()) return;
+    const errs = validateStep(step);
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      Alert.alert('Campos incompletos', 'Completá los campos obligatorios antes de continuar.');
+      return;
+    }
+    setErrors({});
     setStep(s => s + 1);
   }
 
   async function submit() {
+    const errs = validateStep(3);
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      Alert.alert('Campos incompletos', 'Completá los campos obligatorios.');
+      return;
+    }
     setLoading(true);
     try {
-      // En demo: simular envío exitoso
       await new Promise(resolve => setTimeout(resolve, 1000));
       Alert.alert('¡Jornada enviada!', 'El registro fue enviado para aprobación.', [
         { text: 'OK', onPress: () => router.replace('/(jefe)/dashboard') },
@@ -137,7 +158,7 @@ export default function NuevaJornadaScreen() {
   return (
     <View style={s.container}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => step > 1 ? setStep(step - 1) : router.back()}>
+        <TouchableOpacity onPress={() => { setErrors({}); step > 1 ? setStep(step - 1) : router.back(); }}>
           <Text style={s.back}>← {step > 1 ? 'Atrás' : 'Cancelar'}</Text>
         </TouchableOpacity>
         <Text style={s.title}>Nueva Jornada</Text>
@@ -169,37 +190,33 @@ export default function NuevaJornadaScreen() {
             <View style={s.card}>
               <Text style={s.label}>Tipo de trabajo</Text>
               <View style={s.toggleRow}>
-                <TouchableOpacity
-                  style={[s.toggle, form.campo && s.toggleActive]}
-                  onPress={() => set('campo', true)}
-                >
+                <TouchableOpacity style={[s.toggle, form.campo && s.toggleActive]} onPress={() => set('campo', true)}>
                   <Text style={[s.toggleText, form.campo && s.toggleTextActive]}>Campo</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.toggle, !form.campo && s.toggleActive]}
-                  onPress={() => set('campo', false)}
-                >
+                <TouchableOpacity style={[s.toggle, !form.campo && s.toggleActive]} onPress={() => set('campo', false)}>
                   <Text style={[s.toggleText, !form.campo && s.toggleTextActive]}>Taller</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            <View style={s.card}>
-              <Text style={s.label}>Cliente *</Text>
+            <View style={[s.card, !!errors.cliente && s.cardError]}>
+              <Text style={s.label}>Cliente <Text style={s.required}>*</Text></Text>
               <View style={s.chipWrap}>
                 {CLIENTES.map(c => (
                   <SelectOption key={c} label={c} selected={form.cliente === c} onPress={() => set('cliente', c)} />
                 ))}
               </View>
+              <FieldError msg={errors.cliente} />
             </View>
 
-            <View style={s.card}>
-              <Text style={s.label}>Tipo de proyecto *</Text>
+            <View style={[s.card, !!errors.tipoProyecto && s.cardError]}>
+              <Text style={s.label}>Tipo de proyecto <Text style={s.required}>*</Text></Text>
               <View style={s.chipWrap}>
                 {TIPOS_PROYECTO.map(t => (
                   <SelectOption key={t} label={t} selected={form.tipoProyecto === t} onPress={() => set('tipoProyecto', t)} />
                 ))}
               </View>
+              <FieldError msg={errors.tipoProyecto} />
             </View>
 
             <View style={s.card}>
@@ -213,16 +230,17 @@ export default function NuevaJornadaScreen() {
               />
             </View>
 
-            <View style={s.card}>
-              <Text style={s.label}>Descripción de la tarea</Text>
+            <View style={[s.card, !!errors.descripcion && s.cardError]}>
+              <Text style={s.label}>Descripción de la tarea <Text style={s.required}>*</Text></Text>
               <TextInput
-                style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                style={[s.input, { minHeight: 80, textAlignVertical: 'top' }, !!errors.descripcion && s.inputError]}
                 value={form.descripcion}
                 onChangeText={v => set('descripcion', v)}
                 placeholder="Descripción de los trabajos realizados..."
                 placeholderTextColor="#484f58"
                 multiline
               />
+              <FieldError msg={errors.descripcion} />
             </View>
           </>
         )}
@@ -230,13 +248,14 @@ export default function NuevaJornadaScreen() {
         {/* STEP 2 */}
         {step === 2 && (
           <>
-            <View style={s.card}>
-              <Text style={s.label}>Encargado *</Text>
+            <View style={[s.card, !!errors.encargado && s.cardError]}>
+              <Text style={s.label}>Encargado <Text style={s.required}>*</Text></Text>
               <View style={s.chipWrap}>
                 {PERSONAL.map(p => (
                   <SelectOption key={p} label={p} selected={form.encargado === p} onPress={() => set('encargado', p)} />
                 ))}
               </View>
+              <FieldError msg={errors.encargado} />
             </View>
 
             <View style={s.card}>
@@ -291,22 +310,25 @@ export default function NuevaJornadaScreen() {
             <View style={s.card}>
               <Text style={s.cardTitle}>Tiempos</Text>
               {[
-                { key: 'horaInicio', label: 'Salida del hotel / base' },
-                { key: 'horaInicioField', label: 'Llegada al mástil / campo' },
-                { key: 'horaFinField', label: 'Salida del mástil / campo' },
-                { key: 'horaFin', label: 'Llegada al hotel / base' },
-              ].map(({ key, label }) => (
-                <View key={key} style={s.timeRow}>
-                  <Text style={s.timeLabel}>{label}</Text>
-                  <TextInput
-                    style={s.timeInput}
-                    value={(form as any)[key]}
-                    onChangeText={v => set(key as keyof FormData, v)}
-                    placeholder="HH:MM"
-                    placeholderTextColor="#484f58"
-                    keyboardType="numbers-and-punctuation"
-                    maxLength={5}
-                  />
+                { key: 'horaInicio', label: 'Salida del hotel / base', required: true },
+                { key: 'horaInicioField', label: 'Llegada al mástil / campo', required: false },
+                { key: 'horaFinField', label: 'Salida del mástil / campo', required: false },
+                { key: 'horaFin', label: 'Llegada al hotel / base', required: true },
+              ].map(({ key, label, required }) => (
+                <View key={key}>
+                  <View style={s.timeRow}>
+                    <Text style={s.timeLabel}>{label}{required && <Text style={s.required}> *</Text>}</Text>
+                    <TextInput
+                      style={[s.timeInput, !!errors[key] && s.inputError]}
+                      value={(form as any)[key]}
+                      onChangeText={v => set(key as keyof FormData, v)}
+                      placeholder="HH:MM"
+                      placeholderTextColor="#484f58"
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={5}
+                    />
+                  </View>
+                  {errors[key] && <Text style={[s.fieldError, { marginBottom: 4 }]}>{errors[key]}</Text>}
                 </View>
               ))}
             </View>
@@ -375,9 +397,13 @@ const s = StyleSheet.create({
   stepLabel: { color: '#8b949e', fontSize: 10, marginTop: 4 },
   stepLine: { position: 'absolute', top: 30, height: 1, backgroundColor: '#21262d' },
   card: { backgroundColor: '#161b22', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#21262d' },
+  cardError: { borderColor: '#da3633' },
   cardTitle: { color: '#8b949e', fontSize: 12, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   label: { color: '#8b949e', fontSize: 13, marginBottom: 8 },
+  required: { color: '#da3633' },
   input: { backgroundColor: '#0f1117', borderWidth: 1, borderColor: '#30363d', borderRadius: 10, padding: 12, color: 'white', fontSize: 15 },
+  inputError: { borderColor: '#da3633' },
+  fieldError: { color: '#da3633', fontSize: 12, marginTop: 6 },
   toggleRow: { flexDirection: 'row', gap: 10 },
   toggle: { flex: 1, padding: 12, borderRadius: 10, backgroundColor: '#0f1117', borderWidth: 1, borderColor: '#30363d', alignItems: 'center' },
   toggleActive: { backgroundColor: '#1d6fb820', borderColor: '#1d6fb8' },
