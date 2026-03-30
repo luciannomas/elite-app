@@ -113,11 +113,13 @@ export default function NuevaJornadaScreen() {
 
   async function selectVehiculo(patente: string) {
     set('vehiculo', patente);
+    set('kmInicial', '');
     if (!patente) return;
     setKmLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/registros/ultimo-km?patente=${encodeURIComponent(patente)}`);
       const json = await res.json();
+      // Si hay último KM registrado → pre-completar. Si no → dejar vacío para ingreso manual
       if (json.success && json.kmFinal) {
         set('kmInicial', String(json.kmFinal));
       }
@@ -335,12 +337,14 @@ export default function NuevaJornadaScreen() {
                 style={s.input}
                 value={form.kmInicial}
                 onChangeText={v => set('kmInicial', v)}
-                placeholder={kmLoading ? 'Buscando último KM...' : 'Ej: 45000'}
+                placeholder={kmLoading ? 'Buscando...' : form.vehiculo ? 'Sin registros previos — ingresá el KM' : 'Seleccioná un vehículo'}
                 placeholderTextColor="#484f58"
                 keyboardType="numeric"
                 editable={!kmLoading}
               />
-              {kmLoading && <Text style={s.selectedNote}>Cargando último KM registrado...</Text>}
+              {kmLoading && <Text style={s.selectedNote}>Buscando último odómetro registrado...</Text>}
+              {!kmLoading && form.kmInicial ? <Text style={[s.selectedNote, { color: '#238636' }]}>✓ Tomado del último registro</Text> : null}
+              {!kmLoading && form.vehiculo && !form.kmInicial ? <Text style={s.selectedNote}>Sin registros previos — ingresá el valor</Text> : null}
             </View>
 
             <View style={s.card}>
