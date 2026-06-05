@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { API_URL } from '../../../lib/api';
+import { API_URL, getToken } from '../../../lib/api';
 
 const STATUS_COLOR: Record<string, string> = { pre_aprobado: '#9e6a03', aprobado: '#238636', rechazado: '#da3633' };
 const STATUS_LABEL: Record<string, string> = { pre_aprobado: 'Pendiente', aprobado: 'Aprobado', rechazado: 'Rechazado' };
@@ -29,7 +28,7 @@ export default function AprobacionDetailScreen() {
   }, [id]);
 
   async function getHeaders() {
-    const token = await SecureStore.getItemAsync('elite_token');
+    const token = await getToken();
     return token ? { Cookie: `next-auth.session-token=${token}` } : {};
   }
 
@@ -78,7 +77,7 @@ export default function AprobacionDetailScreen() {
           revertir: 'Revertido a pendiente',
         };
         Alert.alert('Listo', msgs[action], action !== 'revertir'
-          ? [{ text: 'OK', onPress: () => router.push('/(auditor)/aprobaciones' as any) }]
+          ? [{ text: 'OK', onPress: () => router.replace('/(auditor)/aprobaciones' as any) }]
           : [{ text: 'OK' }]
         );
       } else {
@@ -109,13 +108,16 @@ export default function AprobacionDetailScreen() {
   return (
     <View style={s.container}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.back()} style={{ width: 60 }}>
           <Text style={s.back}>← Volver</Text>
         </TouchableOpacity>
         <Text style={s.title} numberOfLines={1}>Detalle</Text>
-        <View style={[s.badge, { backgroundColor: `${statusColor}25` }]}>
-          <Text style={[s.badgeText, { color: statusColor }]}>{STATUS_LABEL[registro.status] ?? registro.status}</Text>
-        </View>
+        <TouchableOpacity
+          onPress={() => router.replace('/(auditor)/dashboard' as any)}
+          style={s.homeBtn}
+        >
+          <Text style={s.homeBtnText}>Inicio</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
@@ -273,8 +275,10 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f1117' },
   center: { flex: 1, backgroundColor: '#0f1117', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 56, backgroundColor: '#080b0f', borderBottomWidth: 1, borderBottomColor: '#21262d' },
-  back: { color: '#1d6fb8', fontSize: 15, width: 60 },
+  back: { color: '#1d6fb8', fontSize: 15 },
   title: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1, textAlign: 'center' },
+  homeBtn: { width: 60, alignItems: 'flex-end' },
+  homeBtnText: { color: '#8b949e', fontSize: 14 },
   badge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   badgeText: { fontSize: 11, fontWeight: '600' },
   card: { backgroundColor: '#161b22', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#21262d' },

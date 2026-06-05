@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { API_URL } from '../../lib/api';
+import { API_URL, getToken } from '../../lib/api';
 
 const STATUS_COLOR: Record<string, string> = { pre_aprobado: '#9e6a03', aprobado: '#238636', rechazado: '#da3633' };
 const STATUS_LABEL: Record<string, string> = { pre_aprobado: 'Pendiente', aprobado: 'Aprobado', rechazado: 'Rechazado' };
@@ -15,7 +14,7 @@ export default function AprobacionesScreen() {
   async function loadPendientes(isRefresh = false) {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const token = await SecureStore.getItemAsync('elite_token');
+      const token = await getToken();
       const headers = token ? { Cookie: `next-auth.session-token=${token}` } : {};
       const res = await fetch(`${API_URL}/api/registros?status=pre_aprobado`, { headers });
       const json = await res.json();

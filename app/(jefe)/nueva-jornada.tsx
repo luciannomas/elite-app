@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { API_URL } from '../../lib/api';
+import { API_URL, getToken } from '../../lib/api';
+import { getStoredUser } from '../../lib/auth';
 import type { User } from '../../lib/auth';
 
 type CatalogData = {
@@ -14,9 +14,27 @@ type CatalogData = {
   categoriasStandBy: string[];
 };
 
+const TALLER_OPCIONES = ['Taller San José', 'Taller Madryn', 'Proyecto Integra'];
+const ESTADO_ACTIVIDAD_OPCIONES = ['Productivo', 'Stand-by', 'Viaje', 'Administrativo'];
+
+function formatTimeInput(text: string): string {
+  const digits = text.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+function isValidTime(t: string): boolean {
+  if (!t) return false;
+  if (t.length !== 5 || t[2] !== ':') return false;
+  const h = parseInt(t.slice(0, 2));
+  const m = parseInt(t.slice(3));
+  return h >= 0 && h <= 23 && m >= 0 && m <= 59;
+}
+
 interface FormData {
   fecha: string;
   campo: boolean;
+  estadoActividad: string;
   cliente: string;
   tipoProyecto: string;
   proyectoNombre: string;
@@ -88,6 +106,7 @@ export default function NuevaJornadaScreen() {
   const [form, setForm] = useState<FormData>({
     fecha: today(),
     campo: true,
+    estadoActividad: 'Productivo',
     cliente: '',
     tipoProyecto: '',
     proyectoNombre: '',
@@ -110,9 +129,7 @@ export default function NuevaJornadaScreen() {
   const stepLabels = esTaller ? ['Taller', 'Horarios'] : ['Jornada', 'Personal', 'Tiempos'];
 
   useEffect(() => {
-    SecureStore.getItemAsync('elite_user').then(raw => {
-      if (raw) setCurrentUser(JSON.parse(raw));
-    });
+    getStoredUser().then(user => { if (user) setCurrentUser(user); });
     fetch(`${API_URL}/api/catalogo`)
       .then(r => r.json())
       .then(res => { if (res.success) setCatalog(res.data); })
@@ -141,7 +158,7 @@ export default function NuevaJornadaScreen() {
     if (!patente) return;
     setKmLoading(true);
     try {
-      const token = await SecureStore.getItemAsync('elite_token');
+      const token = await getToken();
       const res = await fetch(`${API_URL}/api/registros/ultimo-km?patente=${encodeURIComponent(patente)}`, {
         headers: token ? { Cookie: `next-auth.session-token=${token}` } : {},
       });
@@ -164,12 +181,14 @@ export default function NuevaJornadaScreen() {
     const errs: Record<string, string> = {};
     if (esTaller) {
       if (step === 1) {
-        if (!form.tipoProyecto) errs.tipoProyecto = 'Seleccioná el tipo de tarea';
+        if (!form.tipoProyecto) errs.tipoProyecto = 'Seleccioná el lugar del taller';
         if (!form.descripcion.trim()) errs.descripcion = 'Describí las tareas realizadas';
       }
       if (step === 2) {
         if (!form.horaInicio) errs.horaInicio = 'Ingresá la hora de entrada';
+        else if (!isValidTime(form.horaInicio)) errs.horaInicio = 'Formato inválido (HH:MM, ej: 08:00)';
         if (!form.horaFin) errs.horaFin = 'Ingresá la hora de salida';
+        else if (!isValidTime(form.horaFin)) errs.horaFin = 'Formato inválido (HH:MM, ej: 17:00)';
       }
     } else {
       if (step === 1) {
@@ -179,10 +198,15 @@ export default function NuevaJornadaScreen() {
       }
       if (step === 2) {
         if (!form.encargado) errs.encargado = 'Seleccioná el encargado de cuadrilla';
+        if (form.kmInicial && form.kmFinal && Number(form.kmFinal) < Number(form.kmInicial)) {
+          errs.kmFinal = 'El KM final no puede ser menor al KM inicial';
+        }
       }
       if (step === 3) {
         if (!form.horaInicio) errs.horaInicio = 'Ingresá la hora de inicio';
+        else if (!isValidTime(form.horaInicio)) errs.horaInicio = 'Formato inválido (HH:MM, ej: 08:00)';
         if (!form.horaFin) errs.horaFin = 'Ingresá la hora de finalización';
+        else if (!isValidTime(form.horaFin)) errs.horaFin = 'Formato inválido (HH:MM, ej: 19:00)';
       }
     }
     return errs;
@@ -208,12 +232,12 @@ export default function NuevaJornadaScreen() {
     }
     setLoading(true);
     try {
-      const token = await SecureStore.getItemAsync('elite_token');
+      const token = await getToken();
       const responsable = currentUser?.name || currentUser?.email || '';
       const payload = {
         fecha: form.fecha,
         trabajoRealizadoEn: form.campo ? 'campo' : 'taller',
-        estadoActividad: 'Productivo',
+        estadoActividad: form.estadoActividad,
         clienteNombre: form.campo ? form.cliente : '',
         proyectoNombre: form.campo ? form.proyectoNombre : '',
         tipoProyecto: form.tipoProyecto,
@@ -300,15 +324,12 @@ export default function NuevaJornadaScreen() {
             </View>
 
             <View style={[s.card, !!errors.tipoProyecto && s.cardError]}>
-              <Text style={s.label}>Tipo de tarea <Text style={s.required}>*</Text></Text>
-              {catalogLoading
-                ? <ActivityIndicator color="#1d6fb8" style={{ marginVertical: 8 }} />
-                : <View style={s.chipWrap}>
-                    {(catalog?.tiposProyecto ?? []).map(t => (
-                      <SelectOption key={t} label={t} selected={form.tipoProyecto === t} onPress={() => set('tipoProyecto', t)} />
-                    ))}
-                  </View>
-              }
+              <Text style={s.label}>Lugar del taller <Text style={s.required}>*</Text></Text>
+              <View style={s.chipWrap}>
+                {TALLER_OPCIONES.map(t => (
+                  <SelectOption key={t} label={t} selected={form.tipoProyecto === t} onPress={() => set('tipoProyecto', t)} />
+                ))}
+              </View>
               <FieldError msg={errors.tipoProyecto} />
             </View>
 
@@ -347,10 +368,10 @@ export default function NuevaJornadaScreen() {
                 <TextInput
                   style={[s.timeInput, !!errors.horaInicio && s.inputError]}
                   value={form.horaInicio}
-                  onChangeText={v => set('horaInicio', v)}
+                  onChangeText={v => set('horaInicio', formatTimeInput(v))}
                   placeholder="HH:MM"
                   placeholderTextColor="#484f58"
-                  keyboardType="numbers-and-punctuation"
+                  keyboardType="number-pad"
                   maxLength={5}
                 />
               </View>
@@ -360,10 +381,10 @@ export default function NuevaJornadaScreen() {
                 <TextInput
                   style={[s.timeInput, !!errors.horaFin && s.inputError]}
                   value={form.horaFin}
-                  onChangeText={v => set('horaFin', v)}
+                  onChangeText={v => set('horaFin', formatTimeInput(v))}
                   placeholder="HH:MM"
                   placeholderTextColor="#484f58"
-                  keyboardType="numbers-and-punctuation"
+                  keyboardType="number-pad"
                   maxLength={5}
                 />
               </View>
@@ -415,6 +436,15 @@ export default function NuevaJornadaScreen() {
                 <TouchableOpacity style={[s.toggle, esTaller && s.toggleActive]} onPress={() => switchTipo(false)}>
                   <Text style={[s.toggleText, esTaller && s.toggleTextActive]}>Taller</Text>
                 </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={s.card}>
+              <Text style={s.label}>Estado de actividad <Text style={s.required}>*</Text></Text>
+              <View style={s.chipWrap}>
+                {ESTADO_ACTIVIDAD_OPCIONES.map(op => (
+                  <SelectOption key={op} label={op} selected={form.estadoActividad === op} onPress={() => set('estadoActividad', op)} />
+                ))}
               </View>
             </View>
 
@@ -537,17 +567,18 @@ export default function NuevaJornadaScreen() {
               {!kmLoading && !!form.vehiculo && !form.kmInicial && <Text style={s.selectedNote}>Sin registros previos — ingresá el valor</Text>}
             </View>
 
-            <View style={s.card}>
+            <View style={[s.card, !!errors.kmFinal && s.cardError]}>
               <Text style={s.label}>Odómetro final (km)</Text>
               <TextInput
-                style={s.input}
+                style={[s.input, !!errors.kmFinal && s.inputError]}
                 value={form.kmFinal}
                 onChangeText={v => set('kmFinal', v)}
                 placeholder="Ej: 45210"
                 placeholderTextColor="#484f58"
                 keyboardType="numeric"
               />
-              {form.kmInicial && form.kmFinal && Number(form.kmFinal) > Number(form.kmInicial) && (
+              <FieldError msg={errors.kmFinal} />
+              {!errors.kmFinal && form.kmInicial && form.kmFinal && Number(form.kmFinal) > Number(form.kmInicial) && (
                 <Text style={s.selectedNote}>KM recorridos: {Number(form.kmFinal) - Number(form.kmInicial)} km</Text>
               )}
             </View>
@@ -571,10 +602,10 @@ export default function NuevaJornadaScreen() {
                     <TextInput
                       style={[s.timeInput, !!errors[key] && s.inputError]}
                       value={(form as any)[key]}
-                      onChangeText={v => set(key as keyof FormData, v)}
+                      onChangeText={v => set(key as keyof FormData, formatTimeInput(v))}
                       placeholder="HH:MM"
                       placeholderTextColor="#484f58"
-                      keyboardType="numbers-and-punctuation"
+                      keyboardType="number-pad"
                       maxLength={5}
                     />
                   </View>

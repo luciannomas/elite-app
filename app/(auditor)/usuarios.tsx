@@ -1,8 +1,7 @@
 import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator, Alert, Modal, RefreshControl } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { API_URL } from '../../lib/api';
+import { API_URL, getToken } from '../../lib/api';
 
 const ROLE_LABEL: Record<string, string> = {
   jefe_cuadrilla: 'Jefe de Cuadrilla',
@@ -32,7 +31,7 @@ export default function UsuariosScreen() {
   const [saving, setSaving] = useState(false);
 
   async function getHeaders(extra?: object) {
-    const token = await SecureStore.getItemAsync('elite_token');
+    const token = await getToken();
     return {
       'Content-Type': 'application/json',
       ...(token ? { Cookie: `next-auth.session-token=${token}` } : {}),

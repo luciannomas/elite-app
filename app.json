@@ -39,6 +39,12 @@
     },
     "updates": {
       "url": "https://u.expo.dev/57e5fa67-91b1-4c1c-8d9b-6fe52058fb01"
-    }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      "expo-router",
+      "expo-secure-store"
+    ]
   }
 }

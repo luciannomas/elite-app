@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { API_URL } from './api';
 
 export interface User {
@@ -11,63 +12,60 @@ export interface User {
 const USER_KEY = 'elite_user';
 const TOKEN_KEY = 'elite_token';
 
+// Fallback a localStorage en web
+async function setItem(key: string, value: string) {
+  if (Platform.OS === 'web') {
+    localStorage.setItem(key, value);
+  } else {
+    await SecureStore.setItemAsync(key, value);
+  }
+}
+
+async function getItem(key: string): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    return localStorage.getItem(key);
+  }
+  return SecureStore.getItemAsync(key);
+}
+
+async function removeItem(key: string) {
+  if (Platform.OS === 'web') {
+    localStorage.removeItem(key);
+  } else {
+    await SecureStore.deleteItemAsync(key);
+  }
+}
+
 export async function login(email: string, password: string): Promise<User> {
-  // 1. Obtener CSRF token
-  const csrfRes = await fetch(`${API_URL}/api/auth/csrf`);
-  const { csrfToken } = await csrfRes.json();
-  const cookies = csrfRes.headers.get('set-cookie') || '';
-
-  // 2. Login con credentials
-  const body = new URLSearchParams({
-    csrfToken,
-    email: email.toLowerCase(),
-    password,
-    callbackUrl: `${API_URL}/auditor`,
-    json: 'true',
-  });
-
-  const loginRes = await fetch(`${API_URL}/api/auth/callback/credentials`, {
+  const res = await fetch(`${API_URL}/api/mobile-auth`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Cookie: cookies,
-    },
-    body: body.toString(),
-    redirect: 'manual',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.toLowerCase(), password }),
   });
 
-  const loginCookies = loginRes.headers.get('set-cookie') || '';
-  const tokenMatch = loginCookies.match(/next-auth\.session-token=([^;]+)/);
-  const sessionToken = tokenMatch?.[1];
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || 'Credenciales incorrectas');
 
-  if (!sessionToken) throw new Error('Credenciales incorrectas');
-
-  // 3. Obtener datos de sesión
-  const sessionRes = await fetch(`${API_URL}/api/auth/session`, {
-    headers: { Cookie: `next-auth.session-token=${sessionToken}` },
-  });
-  const session = await sessionRes.json();
-
-  if (!session?.user) throw new Error('No se pudo obtener la sesión');
-
-  const user: User = {
-    id: session.user.id,
-    name: session.user.name,
-    email: session.user.email,
-    role: session.user.role,
-  };
-
-  await SecureStore.setItemAsync(TOKEN_KEY, sessionToken);
-  await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+  const user: User = json.user;
+  await setItem(TOKEN_KEY, json.token);
+  await setItem(USER_KEY, JSON.stringify(user));
   return user;
 }
 
 export async function logout() {
-  await SecureStore.deleteItemAsync(TOKEN_KEY);
-  await SecureStore.deleteItemAsync(USER_KEY);
+  await removeItem(TOKEN_KEY);
+  await removeItem(USER_KEY);
 }
 
 export async function getStoredUser(): Promise<User | null> {
-  const raw = await SecureStore.getItemAsync(USER_KEY);
-  return raw ? JSON.parse(raw) : null;
+  try {
+    const raw = await getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getStoredToken(): Promise<string | null> {
+  return getItem(TOKEN_KEY);
 }

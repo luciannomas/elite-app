@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { logout, getStoredUser } from '../../lib/auth';
-import { mockKPIs, mockRegistros } from '../../lib/mock-data';
+import { API_URL, getToken } from '../../lib/api';
 
 const STATUS_COLOR: Record<string, string> = {
   pre_aprobado: '#9e6a03', aprobado: '#238636', rechazado: '#da3633',
@@ -24,11 +24,42 @@ function KPI({ label, value, unit, color }: { label: string; value: any; unit?: 
 export default function AuditorDashboard() {
   const insets = useSafeAreaInsets();
   const [user, setUser] = useState<any>(null);
-  const [pendientes, setPendientes] = useState(mockRegistros.filter(r => r.status === 'pre_aprobado'));
+  const [pendientes, setPendientes] = useState<any[]>([]);
+  const [kpis, setKpis] = useState({ pendientes: 0, aprobados: 0, rechazados: 0, hhTotales: 0, kmTotales: 0, productividad: 0 });
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getStoredUser().then(setUser);
-  }, []);
+  async function loadData() {
+    setLoading(true);
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = token ? { Cookie: `next-auth.session-token=${token}` } : {};
+
+      const [metricasRes, pendientesRes, userStored] = await Promise.all([
+        fetch(`${API_URL}/api/metricas`, { headers }).then(r => r.json()).catch(() => null),
+        fetch(`${API_URL}/api/registros?status=pre_aprobado&limit=4`, { headers }).then(r => r.json()).catch(() => null),
+        getStoredUser(),
+      ]);
+
+      setUser(userStored);
+      if (pendientesRes?.success) setPendientes(pendientesRes.data ?? []);
+      if (metricasRes?.success) {
+        const d = metricasRes.data;
+        const prod = d.hhTotales > 0 ? Math.round((d.hhCampo / d.hhTotales) * 100) : 0;
+        setKpis({
+          pendientes: d.pendientes ?? 0,
+          aprobados: d.aprobados ?? 0,
+          rechazados: d.rechazados ?? 0,
+          hhTotales: Math.round(d.hhTotales * 10) / 10,
+          kmTotales: Math.round(d.kmTotales),
+          productividad: prod,
+        });
+      }
+    } catch {}
+    finally { setLoading(false); }
+  }
+
+  // Recarga cada vez que la pantalla toma el foco
+  useFocusEffect(useCallback(() => { loadData(); }, []));
 
   async function handleLogout() {
     await logout();
@@ -37,7 +68,6 @@ export default function AuditorDashboard() {
 
   return (
     <View style={s.container}>
-      {/* Header */}
       <View style={s.header}>
         <View>
           <Text style={s.headerTitle}>Dashboard</Text>
@@ -48,46 +78,61 @@ export default function AuditorDashboard() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-        {/* KPIs */}
-        <View style={s.kpiRow}>
-          <KPI label="Pendientes" value={mockKPIs.pendientes} color="#9e6a03" />
-          <KPI label="Aprobados" value={mockKPIs.aprobados} color="#238636" />
-          <KPI label="Rechazados" value={mockKPIs.rechazados} color="#da3633" />
+      {loading ? (
+        <View style={s.center}>
+          <ActivityIndicator color="#1d6fb8" size="large" />
         </View>
-        <View style={s.kpiRow}>
-          <KPI label="HH Totales" value={mockKPIs.hhTotales} unit="h" color="#1d6fb8" />
-          <KPI label="KM Totales" value={mockKPIs.kmTotales} unit="km" color="#8b949e" />
-          <KPI label="Productividad" value="55" unit="%" color="#1d6fb8" />
-        </View>
-
-        {/* Pendientes */}
-        <View style={s.section}>
-          <View style={s.sectionHeader}>
-            <Text style={s.sectionTitle}>Pendientes</Text>
-            <TouchableOpacity onPress={() => router.push('/(auditor)/aprobaciones')}>
-              <Text style={s.linkText}>Ver todos →</Text>
-            </TouchableOpacity>
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          <View style={s.kpiRow}>
+            <KPI label="Pendientes" value={kpis.pendientes} color="#9e6a03" />
+            <KPI label="Aprobados" value={kpis.aprobados} color="#238636" />
+            <KPI label="Rechazados" value={kpis.rechazados} color="#da3633" />
           </View>
-          {pendientes.slice(0, 4).map(r => (
-            <TouchableOpacity
-              key={r._id}
-              style={s.registroItem}
-              onPress={() => router.push(`/(auditor)/aprobacion/${r._id}` as any)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={s.registroTitle} numberOfLines={1}>{r.proyectoNombre} — {r.clienteNombre}</Text>
-                <Text style={s.registroSub}>{r.fecha} · {r.encargadoNombre}</Text>
-              </View>
-              <View style={[s.badge, { backgroundColor: `${STATUS_COLOR[r.status]}20` }]}>
-                <Text style={[s.badgeText, { color: STATUS_COLOR[r.status] }]}>{STATUS_LABEL[r.status]}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </ScrollView>
+          <View style={s.kpiRow}>
+            <KPI label="HH Totales" value={kpis.hhTotales} unit="h" color="#1d6fb8" />
+            <KPI label="KM Totales" value={kpis.kmTotales} unit="km" color="#8b949e" />
+            <KPI label="Productividad" value={kpis.productividad} unit="%" color="#1d6fb8" />
+          </View>
 
-      {/* Bottom nav */}
+          <View style={s.section}>
+            <View style={s.sectionHeader}>
+              <Text style={s.sectionTitle}>Pendientes</Text>
+              <TouchableOpacity onPress={() => router.push('/(auditor)/aprobaciones' as any)}>
+                <Text style={s.linkText}>Ver todos →</Text>
+              </TouchableOpacity>
+            </View>
+            {pendientes.length === 0 ? (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <Text style={{ color: '#8b949e', fontSize: 13 }}>No hay registros pendientes</Text>
+              </View>
+            ) : (
+              pendientes.map((r: any) => (
+                <TouchableOpacity
+                  key={r._id}
+                  style={s.registroItem}
+                  onPress={() => router.push(`/(auditor)/aprobacion/${r._id}` as any)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.registroTitle} numberOfLines={1}>
+                      {r.proyectoNombre || r.tipoProyecto || '—'}{r.clienteNombre ? ` — ${r.clienteNombre}` : ''}
+                    </Text>
+                    <Text style={s.registroSub}>
+                      {r.fecha ? r.fecha.slice(0, 10) : '—'} · {r.encargadoNombre || '—'}
+                    </Text>
+                  </View>
+                  <View style={[s.badge, { backgroundColor: `${STATUS_COLOR[r.status] ?? '#8b949e'}20` }]}>
+                    <Text style={[s.badgeText, { color: STATUS_COLOR[r.status] ?? '#8b949e' }]}>
+                      {STATUS_LABEL[r.status] ?? r.status}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </ScrollView>
+      )}
+
       <View style={[s.bottomNav, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         {[
           { label: 'Dashboard', path: '/(auditor)/dashboard' },
@@ -106,6 +151,7 @@ export default function AuditorDashboard() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f1117' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 56, backgroundColor: '#080b0f', borderBottomWidth: 1, borderBottomColor: '#21262d' },
   headerTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   headerSub: { color: '#8b949e', fontSize: 13, marginTop: 2 },
